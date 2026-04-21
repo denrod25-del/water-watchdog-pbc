@@ -85,6 +85,17 @@ function Index() {
 
   const sel = selected ? store[selected.PWSID] : undefined;
 
+  if (authLoading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {authLoading ? "Loading…" : "Redirecting to sign in…"}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Toaster richColors position="top-right" />
