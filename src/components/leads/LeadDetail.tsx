@@ -5,6 +5,8 @@ import { Mail, Phone, MapPin, Building2, Users, Droplet, AlertTriangle, FlaskCon
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { LeadStatus } from "./useLeadStatus";
+import { ProductMatcher } from "./ProductMatcher";
+import { recommendProducts } from "@/lib/matcher";
 
 const STATUS_ORDER: LeadStatus[] = ["new", "contacted", "qualified", "won", "lost"];
 const STATUS_LABEL: Record<LeadStatus, string> = {
@@ -38,7 +40,12 @@ export function LeadDetail({
   const cuMg = lead["Copper 90th %ile (mg/L)"];
 
   const copyPitch = () => {
-    const pitch = `Hi ${lead.Contact || "team"} at ${lead["System Name"]},\n\nEPA SDWIS records show ${flags.length ? flags.join(", ") + "." : "compliance issues with your system."} We help water systems serving ${formatNumber(lead["Population Served"])} people deliver compliant, clean water with point-of-entry and point-of-use filtration.\n\nCould we schedule 15 minutes to walk through options?`;
+    const recs = recommendProducts(lead);
+    const top = recs[0];
+    const productLine = top
+      ? `\n\nBased on your violation profile, our ${top.product.name} (${top.product.sku}) is engineered to address exactly this — ${top.product.blurb}`
+      : "";
+    const pitch = `Hi ${lead.Contact || "team"} at ${lead["System Name"]},\n\nEPA SDWIS records show ${flags.length ? flags.join(", ") + "." : "compliance issues with your system."} We help water systems serving ${formatNumber(lead["Population Served"])} people deliver compliant, clean water with point-of-entry and point-of-use filtration.${productLine}\n\nCould we schedule 15 minutes to walk through options?`;
     navigator.clipboard.writeText(pitch);
     toast.success("Outreach pitch copied");
   };
@@ -83,6 +90,8 @@ export function LeadDetail({
           <Metric label="LCR violations (5yr)" value={lead["LCR Violations (5yr)"]} bad={lead["LCR Violations (5yr)"] > 0} />
           <Metric label="Unresolved (5yr)" value={lead["Unresolved Violations (5yr)"]} bad={lead["Unresolved Violations (5yr)"] > 0} />
         </div>
+
+        <ProductMatcher lead={lead} />
 
         <div className="mt-6 space-y-2 rounded-xl border border-border bg-card p-4">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Contact</h3>
