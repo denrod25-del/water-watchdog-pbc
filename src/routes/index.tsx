@@ -10,6 +10,7 @@ import { LeadTable } from "@/components/leads/LeadTable";
 import { LeadMap } from "@/components/leads/LeadMap";
 import { LeadDetail } from "@/components/leads/LeadDetail";
 import { useLeadStore, type LeadStatus } from "@/components/leads/useLeadStatus";
+import { AuthBar } from "@/components/leads/AuthBar";
 import { Toaster } from "@/components/ui/sonner";
 import { AlertOctagon, Beaker, Droplet, FileSpreadsheet, FileText, ShieldAlert, Map as MapIcon, Table as TableIcon } from "lucide-react";
 
@@ -77,6 +78,7 @@ function Index() {
     <div className="min-h-screen bg-background">
       <Toaster richColors position="top-right" />
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-8 sm:py-10">
+        <AuthBar />
         <Hero totalSystems={ALL_LEADS.length} hot={stats.hot} />
 
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
