@@ -1,0 +1,134 @@
+[
+  {
+    "sku": "WQ-RO-5K",
+    "name": "AquaPure RO-5000 Reverse Osmosis (POU)",
+    "tier": "POU",
+    "category": "Reverse Osmosis",
+    "price": 489,
+    "monthlyService": 24,
+    "treats": ["lead", "copper", "arsenic", "nitrate", "fluoride", "tds", "radium"],
+    "blurb": "5-stage under-sink RO. NSF/ANSI 58 certified for lead, arsenic V, nitrate, and copper reduction at the tap.",
+    "leadTimeDays": 5
+  },
+  {
+    "sku": "WQ-CB-PRO",
+    "name": "CarbonBlock Pro 0.5µm (POU)",
+    "tier": "POU",
+    "category": "Carbon Block",
+    "price": 189,
+    "monthlyService": 12,
+    "treats": ["lead", "tthm", "haa5", "voc", "chlorine", "pfas-light"],
+    "blurb": "NSF/ANSI 53 certified lead + VOC reduction. Removes disinfection by-products (TTHM/HAA5) and chlorine taste.",
+    "leadTimeDays": 3
+  },
+  {
+    "sku": "WQ-WH-CARBON",
+    "name": "WholeHouse CarbonGuard 1.5cf (POE)",
+    "tier": "POE",
+    "category": "Whole-House Carbon",
+    "price": 1890,
+    "monthlyService": 49,
+    "treats": ["tthm", "haa5", "voc", "chlorine", "chloramine", "radon", "pfas-light"],
+    "blurb": "Catalytic carbon backwashing tank for chloramine, TTHM/HAA5, and VOC reduction across the entire building.",
+    "leadTimeDays": 10
+  },
+  {
+    "sku": "WQ-IX-NITRATE",
+    "name": "NitrateShield Ion-Exchange (POE)",
+    "tier": "POE",
+    "category": "Anion Ion Exchange",
+    "price": 2450,
+    "monthlyService": 65,
+    "treats": ["nitrate", "nitrite", "perchlorate"],
+    "blurb": "Nitrate-selective resin tank. Designed for systems exceeding 10 mg/L nitrate-N MCL.",
+    "leadTimeDays": 14
+  },
+  {
+    "sku": "WQ-AS-ADSORB",
+    "name": "ArsenicOut Adsorption Tank (POE)",
+    "tier": "POE",
+    "category": "Iron-Oxide Adsorption",
+    "price": 3290,
+    "monthlyService": 95,
+    "treats": ["arsenic", "antimony", "uranium"],
+    "blurb": "Granular ferric oxide media targeting arsenic III/V. NSF/ANSI 61 components, sized to community-system flow.",
+    "leadTimeDays": 21
+  },
+  {
+    "sku": "WQ-PFAS-X",
+    "name": "PFAS-X Dual-Bed (POE)",
+    "tier": "POE",
+    "category": "Ion Exchange + GAC",
+    "price": 4750,
+    "monthlyService": 130,
+    "treats": ["pfas", "pfoa", "pfos", "pfas-light"],
+    "blurb": "Single-use IX resin + GAC polish. Targets EPA's 2024 PFAS MCL of 4 ppt for PFOA/PFOS.",
+    "leadTimeDays": 28
+  },
+  {
+    "sku": "WQ-DBP-MIX",
+    "name": "DBP Mitigation Aeration (System)",
+    "tier": "SYSTEM",
+    "category": "Spray Aeration",
+    "price": 18500,
+    "monthlyService": 240,
+    "treats": ["tthm", "haa5"],
+    "blurb": "Tower-aeration retrofit for storage tanks. Cuts TTHM 40-70% pre-distribution. Engineered install.",
+    "leadTimeDays": 60
+  },
+  {
+    "sku": "WQ-UV-D",
+    "name": "UV-D Disinfection (POE)",
+    "tier": "POE",
+    "category": "UV Disinfection",
+    "price": 1290,
+    "monthlyService": 35,
+    "treats": ["coliform", "ecoli", "giardia", "crypto"],
+    "blurb": "40 mJ/cm² NSF/ANSI 55 Class A reactor. For systems with microbial MCL exceedances or boil-water advisories.",
+    "leadTimeDays": 7
+  },
+  {
+    "sku": "WQ-PHC-PHOS",
+    "name": "OrthoPhos Corrosion Control (System)",
+    "tier": "SYSTEM",
+    "category": "Phosphate Dosing",
+    "price": 6800,
+    "monthlyService": 180,
+    "treats": ["lead", "copper"],
+    "blurb": "Orthophosphate metering skid for distribution-side lead/copper passivation. Often required by state after LCR exceedance.",
+    "leadTimeDays": 30
+  },
+  {
+    "sku": "WQ-RAD-TANK",
+    "name": "RadShield HMO Tank (POE)",
+    "tier": "POE",
+    "category": "HMO Adsorption",
+    "price": 3850,
+    "monthlyService": 110,
+    "treats": ["radium", "uranium", "gross-alpha"],
+    "blurb": "Hydrous manganese oxide media for radionuclide reduction. Replaces softener-only setups that fail combined-radium MCL.",
+    "leadTimeDays": 21
+  },
+  {
+    "sku": "WQ-PITCHER",
+    "name": "Compliance Pitcher Program (POU bulk)",
+    "tier": "POU",
+    "category": "Filtered Pitcher",
+    "price": 39,
+    "monthlyService": 14,
+    "treats": ["lead", "chlorine", "pfas-light"],
+    "blurb": "Per-household NSF 53 pitcher program. Used as interim mitigation while POE/system fixes are designed.",
+    "leadTimeDays": 2
+  },
+  {
+    "sku": "WQ-AUDIT",
+    "name": "Compliance Audit + Remediation Plan",
+    "tier": "SERVICE",
+    "category": "Engineering Service",
+    "price": 2500,
+    "monthlyService": 0,
+    "treats": ["unresolved", "mcl-generic", "health-based"],
+    "blurb": "Licensed engineer reviews violation history, samples, and infrastructure. Delivers a stamped remediation roadmap acceptable to state regulators.",
+    "leadTimeDays": 14
+  }
+]
