@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import type { Lead } from "@/lib/format";
 import zipCentroids from "@/data/zip-centroids.json";
 
-const ZIPS = zipCentroids as Record<string, [number, number]>;
+const ZIPS = zipCentroids as unknown as Record<string, [number, number]>;
 
 const PRIORITY_COLOR: Record<string, string> = {
   HOT: "#ef4444",
