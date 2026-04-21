@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import leadsData from "@/data/leads.json";
 import type { Lead } from "@/lib/format";
 import { formatNumber } from "@/lib/format";
@@ -11,8 +12,9 @@ import { LeadMap } from "@/components/leads/LeadMap";
 import { LeadDetail } from "@/components/leads/LeadDetail";
 import { useLeadStore, type LeadStatus } from "@/components/leads/useLeadStatus";
 import { AuthBar } from "@/components/leads/AuthBar";
+import { useAuth } from "@/hooks/useAuth";
 import { Toaster } from "@/components/ui/sonner";
-import { AlertOctagon, Beaker, Droplet, FileSpreadsheet, FileText, ShieldAlert, Map as MapIcon, Table as TableIcon } from "lucide-react";
+import { AlertOctagon, Beaker, Droplet, FileSpreadsheet, FileText, Loader2, ShieldAlert, Map as MapIcon, Table as TableIcon } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -22,6 +24,15 @@ const ALL_LEADS = leadsData as Lead[];
 const PRIO_ORDER: Record<string, number> = { HOT: 0, WARM: 1, COOL: 2, COLD: 3 };
 
 function Index() {
+  const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate({ to: "/auth" });
+    }
+  }, [authLoading, user, navigate]);
+
   const [filters, setFilters] = useState<FilterState>({
     q: "",
     priorities: new Set(["HOT", "WARM", "COOL", "COLD"]),
@@ -73,6 +84,17 @@ function Index() {
   }, []);
 
   const sel = selected ? store[selected.PWSID] : undefined;
+
+  if (authLoading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {authLoading ? "Loading…" : "Redirecting to sign in…"}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
