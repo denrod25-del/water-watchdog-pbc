@@ -7,10 +7,11 @@ import { Hero } from "@/components/leads/Hero";
 import { StatTile } from "@/components/leads/StatTile";
 import { Filters, type FilterState } from "@/components/leads/Filters";
 import { LeadTable } from "@/components/leads/LeadTable";
+import { LeadMap } from "@/components/leads/LeadMap";
 import { LeadDetail } from "@/components/leads/LeadDetail";
 import { useLeadStore, type LeadStatus } from "@/components/leads/useLeadStatus";
 import { Toaster } from "@/components/ui/sonner";
-import { AlertOctagon, Beaker, Droplet, FileSpreadsheet, FileText, ShieldAlert } from "lucide-react";
+import { AlertOctagon, Beaker, Droplet, FileSpreadsheet, FileText, ShieldAlert, Map as MapIcon, Table as TableIcon } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -29,6 +30,7 @@ function Index() {
     minPop: 0,
   });
   const [selected, setSelected] = useState<Lead | null>(null);
+  const [view, setView] = useState<"table" | "map">("table");
   const { store, update } = useLeadStore();
 
   const filtered = useMemo(() => {
@@ -104,7 +106,32 @@ function Index() {
 
         <Filters state={filters} setState={setFilters} total={ALL_LEADS.length} shown={filtered.length} />
 
-        <LeadTable leads={filtered} onSelect={setSelected} store={store} />
+        <div className="flex items-center justify-end">
+          <div className="inline-flex rounded-xl border border-border bg-card p-1 shadow-sm">
+            <button
+              onClick={() => setView("table")}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                view === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              <TableIcon className="h-3.5 w-3.5" /> Table
+            </button>
+            <button
+              onClick={() => setView("map")}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                view === "map" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              <MapIcon className="h-3.5 w-3.5" /> Map
+            </button>
+          </div>
+        </div>
+
+        {view === "table" ? (
+          <LeadTable leads={filtered} onSelect={setSelected} store={store} />
+        ) : (
+          <LeadMap leads={filtered} onSelect={setSelected} />
+        )}
 
         <footer className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-border bg-card p-4 text-xs text-muted-foreground sm:flex-row sm:items-center">
           <p className="flex items-center gap-2">
