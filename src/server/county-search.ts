@@ -22,13 +22,16 @@ type CountySearchResult = {
 
 const EFS_BASE = "https://data.epa.gov/efservice";
 
-/** Fetch a JSON table from EPA Envirofacts with a row-range cap. */
-async function efs<T = Record<string, unknown>>(path: string, max = 1000): Promise<T[]> {
+/** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout. */
+async function efs<T = Record<string, unknown>>(
+  path: string,
+  max = 500,
+  timeoutMs = 12_000,
+): Promise<T[]> {
   const url = `${EFS_BASE}/${path}/ROWS/0:${max - 1}/JSON`;
   const res = await fetch(url, {
     headers: { Accept: "application/json", "User-Agent": "WaterLeads/1.0" },
-    // EPA's service can be slow — give it a generous timeout via AbortSignal
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
@@ -41,6 +44,24 @@ async function efs<T = Record<string, unknown>>(path: string, max = 1000): Promi
   } catch {
     return [];
   }
+}
+
+/** Run promises with a max concurrency to avoid overwhelming the EPA API. */
+async function pMap<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, i: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 /** Pluck a value from an EPA row using any of the possible casings the API returns. */
