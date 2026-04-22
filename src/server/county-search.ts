@@ -167,49 +167,67 @@ function buildSystem(
 
 async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
   const countyUpper = county.toUpperCase();
+  const startedAt = Date.now();
+  const BUDGET_MS = 20_000; // total time budget for the whole EPA fetch
 
   // 1. Try server-side county filter first (much smaller payload). Fall back to
-  //    state-wide fetch + client filter if the API rejects the county string.
+  //    state-wide fetch + client filter if the API rejects/times out.
   let inCounty: Record<string, unknown>[] = [];
   try {
-    const byCounty = await efs<Record<string, unknown>>(
-      `WATER_SYSTEM/STATE_CODE/${state}/PRINCIPAL_COUNTY_SERVED/${encodeURIComponent(county.toUpperCase())}/PWS_ACTIVITY_CODE/A`,
+    inCounty = await efs<Record<string, unknown>>(
+      `WATER_SYSTEM/STATE_CODE/${state}/PRINCIPAL_COUNTY_SERVED/${encodeURIComponent(countyUpper)}/PWS_ACTIVITY_CODE/A`,
       500,
-      10_000,
+      8_000,
+      1,
     );
-    inCounty = byCounty;
   } catch (e) {
     console.warn("County-filtered query failed, falling back to state-wide:", e);
   }
 
   if (inCounty.length === 0) {
-    const systems = await efs<Record<string, unknown>>(
-      `WATER_SYSTEM/STATE_CODE/${state}/PWS_ACTIVITY_CODE/A`,
-      1000,
-      15_000,
-    );
-    inCounty = systems.filter((s) => {
-      const c = str(s, "county_served", "COUNTY_SERVED", "principal_county_served", "PRINCIPAL_COUNTY_SERVED");
-      return c.toUpperCase().includes(countyUpper);
-    });
+    try {
+      const systems = await efs<Record<string, unknown>>(
+        `WATER_SYSTEM/STATE_CODE/${state}/PWS_ACTIVITY_CODE/A`,
+        1000,
+        12_000,
+        1,
+      );
+      inCounty = systems.filter((s) => {
+        const c = str(s, "county_served", "COUNTY_SERVED", "principal_county_served", "PRINCIPAL_COUNTY_SERVED");
+        return c.toUpperCase().includes(countyUpper);
+      });
+    } catch (e) {
+      console.error("State-wide fallback also failed:", e);
+      throw e;
+    }
   }
 
   if (inCounty.length === 0) return [];
 
-  // 2. Pull violations for top systems with bounded concurrency. Systems without
-  //    fetched violations still get scored (zero-violation fallback).
+  // 2. Pull violations for top systems with bounded concurrency, but only if we
+  //    still have time budget. Systems without fetched violations still get
+  //    scored (zero-violation fallback) so the user always gets results.
   const pwsids = inCounty.map((s) => str(s, "pwsid", "PWSID")).filter(Boolean);
   const vioByPws = new Map<string, Record<string, unknown>[]>();
 
-  const TOP = pwsids.slice(0, 30);
-  await pMap(TOP, 5, async (id) => {
-    try {
-      const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 6_000);
-      vioByPws.set(id, vios);
-    } catch {
-      vioByPws.set(id, []);
-    }
-  });
+  const remaining = BUDGET_MS - (Date.now() - startedAt);
+  if (remaining > 4_000) {
+    const TOP = pwsids.slice(0, 20);
+    await pMap(TOP, 4, async (id) => {
+      if (Date.now() - startedAt > BUDGET_MS) {
+        vioByPws.set(id, []);
+        return;
+      }
+      try {
+        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 5_000, 0);
+        vioByPws.set(id, vios);
+      } catch {
+        vioByPws.set(id, []);
+      }
+    });
+  } else {
+    console.warn("Skipping violations fetch — out of time budget");
+  }
 
   return inCounty.map((ws) => {
     const id = str(ws, "pwsid", "PWSID");
