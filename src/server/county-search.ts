@@ -40,15 +40,17 @@ async function efs<T = Record<string, unknown>>(
       if (!res.ok) throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
       const text = await res.text();
       if (!text.trim()) return [];
+      // EPA sometimes returns a JSON error object like {"error": "..."} instead of an array.
       try {
         const json = JSON.parse(text);
-        return Array.isArray(json) ? (json as T[]) : [];
+        if (Array.isArray(json)) return json as T[];
+        return [];
       } catch {
+        // Non-JSON (often an XML error page) — treat as empty.
         return [];
       }
     } catch (e) {
       lastErr = e;
-      // Brief backoff before retry
       if (attempt < retries) await new Promise((r) => setTimeout(r, 500));
     }
   }
@@ -94,6 +96,23 @@ function num(row: Record<string, unknown>, ...keys: string[]): number {
 function str(row: Record<string, unknown>, ...keys: string[]): string {
   const v = pick<string | number>(row, ...keys);
   return v === undefined || v === null ? "" : String(v);
+}
+
+/** Title-case a county name so it matches the EPA `county_served` field
+ *  (e.g. "PALM BEACH" / "palm beach" -> "Palm Beach", "st. lucie" -> "St. Lucie").
+ *  EPA filtering is case-sensitive on this column. */
+function normalizeCounty(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) =>
+      w
+        .split("-")
+        .map((p) => (p ? p[0].toUpperCase() + p.slice(1) : p))
+        .join("-"),
+    )
+    .join(" ");
 }
 
 /** Map an EPA WATER_SYSTEM row + a list of its violation rows into a scored Lead. */
@@ -166,60 +185,63 @@ function buildSystem(
 }
 
 async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
-  const countyUpper = county.toUpperCase();
+  const countyName = normalizeCounty(county);
   const startedAt = Date.now();
   const BUDGET_MS = 20_000; // total time budget for the whole EPA fetch
 
-  // 1. Try server-side county filter first (much smaller payload). Fall back to
-  //    state-wide fetch + client filter if the API rejects/times out.
-  let inCounty: Record<string, unknown>[] = [];
+  // 1. Look up which PWSIDs actually serve this county via GEOGRAPHIC_AREA.
+  //    This is the only EPA table that has a usable county filter; the
+  //    PRINCIPAL_COUNTY_SERVED column on WATER_SYSTEM is silently ignored
+  //    by Envirofacts and returns the first 1000 rows of the state.
+  let geoRows: Record<string, unknown>[] = [];
   try {
-    inCounty = await efs<Record<string, unknown>>(
-      `WATER_SYSTEM/STATE_CODE/${state}/PRINCIPAL_COUNTY_SERVED/${encodeURIComponent(countyUpper)}/PWS_ACTIVITY_CODE/A`,
+    geoRows = await efs<Record<string, unknown>>(
+      `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(countyName)}/PWS_ACTIVITY_CODE/A`,
       500,
-      8_000,
+      10_000,
       1,
     );
   } catch (e) {
-    console.warn("County-filtered query failed, falling back to state-wide:", e);
+    console.error("GEOGRAPHIC_AREA lookup failed:", e);
+    throw e;
   }
 
-  if (inCounty.length === 0) {
+  // De-duplicate PWSIDs (a system can have multiple geo rows: county + city + zip).
+  const pwsidSet = new Set<string>();
+  for (const g of geoRows) {
+    const id = str(g, "pwsid", "PWSID");
+    if (id) pwsidSet.add(id);
+  }
+  const pwsids = Array.from(pwsidSet);
+  if (pwsids.length === 0) return [];
+
+  // 2. Fetch WATER_SYSTEM details for each PWSID. Bounded concurrency.
+  //    Cap at 60 systems to stay well within the time budget.
+  const TOP_SYSTEMS = pwsids.slice(0, 60);
+  const wsById = new Map<string, Record<string, unknown>>();
+  await pMap(TOP_SYSTEMS, 6, async (id) => {
+    if (Date.now() - startedAt > BUDGET_MS - 6_000) return;
     try {
-      const systems = await efs<Record<string, unknown>>(
-        `WATER_SYSTEM/STATE_CODE/${state}/PWS_ACTIVITY_CODE/A`,
-        1000,
-        12_000,
-        1,
-      );
-      inCounty = systems.filter((s) => {
-        const c = str(s, "county_served", "COUNTY_SERVED", "principal_county_served", "PRINCIPAL_COUNTY_SERVED");
-        return c.toUpperCase().includes(countyUpper);
-      });
-    } catch (e) {
-      console.error("State-wide fallback also failed:", e);
-      throw e;
+      const rows = await efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${id}`, 1, 5_000, 0);
+      if (rows[0]) wsById.set(id, rows[0]);
+    } catch {
+      /* skip — system will be omitted */
     }
-  }
+  });
 
-  if (inCounty.length === 0) return [];
+  if (wsById.size === 0) return [];
 
-  // 2. Pull violations for top systems with bounded concurrency, but only if we
-  //    still have time budget. Systems without fetched violations still get
-  //    scored (zero-violation fallback) so the user always gets results.
-  const pwsids = inCounty.map((s) => str(s, "pwsid", "PWSID")).filter(Boolean);
+  // 3. Pull violations only for the systems we successfully fetched and only
+  //    if there's time budget left. Systems without violation data still get
+  //    scored (zero-violation fallback).
   const vioByPws = new Map<string, Record<string, unknown>[]>();
-
   const remaining = BUDGET_MS - (Date.now() - startedAt);
   if (remaining > 4_000) {
-    const TOP = pwsids.slice(0, 20);
-    await pMap(TOP, 4, async (id) => {
-      if (Date.now() - startedAt > BUDGET_MS) {
-        vioByPws.set(id, []);
-        return;
-      }
+    const ids = Array.from(wsById.keys()).slice(0, 25);
+    await pMap(ids, 4, async (id) => {
+      if (Date.now() - startedAt > BUDGET_MS) return;
       try {
-        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 5_000, 0);
+        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 4_000, 0);
         vioByPws.set(id, vios);
       } catch {
         vioByPws.set(id, []);
@@ -229,10 +251,9 @@ async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
     console.warn("Skipping violations fetch — out of time budget");
   }
 
-  return inCounty.map((ws) => {
-    const id = str(ws, "pwsid", "PWSID");
-    return buildSystem(ws, vioByPws.get(id) || []);
-  });
+  return Array.from(wsById.entries()).map(([id, ws]) =>
+    buildSystem(ws, vioByPws.get(id) || []),
+  );
 }
 
 export const searchCounty = createServerFn({ method: "POST" })
