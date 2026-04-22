@@ -159,34 +159,47 @@ function buildSystem(
 async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
   const countyUpper = county.toUpperCase();
 
-  // 1. Water systems in the state, then filter by principal-county-served client-side
-  //    (Envirofacts URL filters are restrictive about case + spaces in county names).
-  const systems = await efs<Record<string, unknown>>(
-    `WATER_SYSTEM/STATE_CODE/${state}/PWS_ACTIVITY_CODE/A`,
-    1000,
-  );
+  // 1. Try server-side county filter first (much smaller payload). Fall back to
+  //    state-wide fetch + client filter if the API rejects the county string.
+  let inCounty: Record<string, unknown>[] = [];
+  try {
+    const byCounty = await efs<Record<string, unknown>>(
+      `WATER_SYSTEM/STATE_CODE/${state}/PRINCIPAL_COUNTY_SERVED/${encodeURIComponent(county.toUpperCase())}/PWS_ACTIVITY_CODE/A`,
+      500,
+      10_000,
+    );
+    inCounty = byCounty;
+  } catch (e) {
+    console.warn("County-filtered query failed, falling back to state-wide:", e);
+  }
 
-  const inCounty = systems.filter((s) => {
-    const c = str(s, "county_served", "COUNTY_SERVED", "principal_county_served", "PRINCIPAL_COUNTY_SERVED");
-    return c.toUpperCase().includes(countyUpper);
-  });
+  if (inCounty.length === 0) {
+    const systems = await efs<Record<string, unknown>>(
+      `WATER_SYSTEM/STATE_CODE/${state}/PWS_ACTIVITY_CODE/A`,
+      1000,
+      15_000,
+    );
+    inCounty = systems.filter((s) => {
+      const c = str(s, "county_served", "COUNTY_SERVED", "principal_county_served", "PRINCIPAL_COUNTY_SERVED");
+      return c.toUpperCase().includes(countyUpper);
+    });
+  }
 
   if (inCounty.length === 0) return [];
 
-  // 2. Pull violations for these PWSIDs in chunks (Envirofacts allows IN-style via repeated calls).
+  // 2. Pull violations for top systems with bounded concurrency. Systems without
+  //    fetched violations still get scored (zero-violation fallback).
   const pwsids = inCounty.map((s) => str(s, "pwsid", "PWSID")).filter(Boolean);
   const vioByPws = new Map<string, Record<string, unknown>[]>();
 
-  // Cap at 60 systems of violations to keep response < 25s; remaining systems still get scored
-  // with whatever data we have (zero-violation fallback).
-  const TOP = pwsids.slice(0, 60);
-  const results = await Promise.allSettled(
-    TOP.map((id) =>
-      efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 200).catch(() => [] as Record<string, unknown>[]),
-    ),
-  );
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") vioByPws.set(TOP[i], r.value);
+  const TOP = pwsids.slice(0, 30);
+  await pMap(TOP, 5, async (id) => {
+    try {
+      const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 6_000);
+      vioByPws.set(id, vios);
+    } catch {
+      vioByPws.set(id, []);
+    }
   });
 
   return inCounty.map((ws) => {
