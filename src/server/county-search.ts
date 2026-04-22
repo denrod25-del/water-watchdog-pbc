@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { scoreSystem, type RawSystem } from "@/lib/score";
 import type { Lead } from "@/lib/format";
+import leadsData from "@/data/leads.json";
 
 const InputSchema = z.object({
   state: z.string().length(2).regex(/^[A-Z]{2}$/),
@@ -21,6 +22,14 @@ type CountySearchResult = {
 };
 
 const EFS_BASE = "https://data.epa.gov/efservice";
+const EPA_FETCH_BUDGET_MS = 14_000;
+const GEO_LOOKUP_TIMEOUT_MS = 7_500;
+const DETAIL_TIMEOUT_MS = 3_500;
+const DETAIL_CONCURRENCY = 4;
+const MAX_SYSTEM_DETAILS = 12;
+const MAX_VIOLATION_LOOKUPS = 4;
+const VIOLATION_TIMEOUT_MS = 2_500;
+const historicalLeadById = new Map((leadsData as Lead[]).map((lead) => [lead.PWSID, lead]));
 
 /** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout. */
 async function efs<T = Record<string, unknown>>(
@@ -113,6 +122,71 @@ function normalizeCounty(input: string): string {
         .join("-"),
     )
     .join(" ");
+}
+
+function countyVariants(input: string): string[] {
+  const base = normalizeCounty(input).replace(/\s+county$/i, "");
+  const variants = [base];
+
+  if (/^St\.?\s+/i.test(base)) variants.push(base.replace(/^St\.?\s+/i, "Saint "));
+  if (/^Saint\s+/i.test(base)) variants.push(base.replace(/^Saint\s+/i, "St. "));
+
+  return Array.from(new Set(variants.filter(Boolean)));
+}
+
+function mergeHistoricalLead(base: Lead, ws: Record<string, unknown>): Lead {
+  return {
+    ...base,
+    "System Name": str(ws, "pws_name", "PWS_NAME") || base["System Name"],
+    Type: str(ws, "pws_type_code", "PWS_TYPE_CODE") || base.Type,
+    "Population Served": num(ws, "population_served_count", "POPULATION_SERVED_COUNT") || base["Population Served"],
+    "Service Connections": num(ws, "service_connections_count", "SERVICE_CONNECTIONS_COUNT") || base["Service Connections"],
+    Source: str(ws, "primary_source_code", "PRIMARY_SOURCE_CODE") || base.Source,
+    "Owner Type": str(ws, "owner_type_code", "OWNER_TYPE_CODE") || base["Owner Type"],
+    City: str(ws, "city_name", "CITY_NAME") || base.City,
+    Zip: str(ws, "zip_code", "ZIP_CODE") || base.Zip,
+    Address: str(ws, "address_line1", "ADDRESS_LINE1") || base.Address,
+    Contact: str(ws, "org_name", "ORG_NAME") || base.Contact,
+    Phone: str(ws, "phone_number", "PHONE_NUMBER") || base.Phone,
+    Email: str(ws, "email_addr", "EMAIL_ADDR") || base.Email,
+  };
+}
+
+async function fetchGeoRows(state: string, county: string): Promise<Record<string, unknown>[]> {
+  let lastError: unknown;
+
+  for (const candidate of countyVariants(county)) {
+    try {
+      const rows = await efs<Record<string, unknown>>(
+        `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(candidate)}/PWS_ACTIVITY_CODE/A`,
+        300,
+        GEO_LOOKUP_TIMEOUT_MS,
+        0,
+      );
+      if (rows.length > 0) return rows;
+    } catch (error) {
+      lastError = error;
+      break;
+    }
+  }
+
+  if (lastError) throw lastError;
+  return [];
+}
+
+function prioritizePwsids(ids: string[]): string[] {
+  return [...ids].sort((a, b) => {
+    const scoreDiff = (historicalLeadById.get(b)?.["Lead Score"] ?? -1) - (historicalLeadById.get(a)?.["Lead Score"] ?? -1);
+    if (scoreDiff !== 0) return scoreDiff;
+    return a.localeCompare(b);
+  });
+}
+
+function buildLead(ws: Record<string, unknown>, vios: Record<string, unknown>[]): Lead {
+  const pwsid = str(ws, "pwsid", "PWSID");
+  const historical = historicalLeadById.get(pwsid);
+  if (historical && vios.length === 0) return mergeHistoricalLead(historical, ws);
+  return buildSystem(ws, vios);
 }
 
 /** Map an EPA WATER_SYSTEM row + a list of its violation rows into a scored Lead. */
