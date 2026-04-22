@@ -26,24 +26,33 @@ const EFS_BASE = "https://data.epa.gov/efservice";
 async function efs<T = Record<string, unknown>>(
   path: string,
   max = 500,
-  timeoutMs = 12_000,
+  timeoutMs = 8_000,
+  retries = 1,
 ): Promise<T[]> {
   const url = `${EFS_BASE}/${path}/ROWS/0:${max - 1}/JSON`;
-  const res = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": "WaterLeads/1.0" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!res.ok) {
-    throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": "WaterLeads/1.0" },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
+      const text = await res.text();
+      if (!text.trim()) return [];
+      try {
+        const json = JSON.parse(text);
+        return Array.isArray(json) ? (json as T[]) : [];
+      } catch {
+        return [];
+      }
+    } catch (e) {
+      lastErr = e;
+      // Brief backoff before retry
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 500));
+    }
   }
-  const text = await res.text();
-  if (!text.trim()) return [];
-  try {
-    const json = JSON.parse(text);
-    return Array.isArray(json) ? (json as T[]) : [];
-  } catch {
-    return [];
-  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /** Run promises with a max concurrency to avoid overwhelming the EPA API. */
