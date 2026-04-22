@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { scoreSystem, type RawSystem } from "@/lib/score";
 import type { Lead } from "@/lib/format";
+import leadsData from "@/data/leads.json";
 
 const InputSchema = z.object({
   state: z.string().length(2).regex(/^[A-Z]{2}$/),
@@ -21,6 +22,14 @@ type CountySearchResult = {
 };
 
 const EFS_BASE = "https://data.epa.gov/efservice";
+const EPA_FETCH_BUDGET_MS = 14_000;
+const GEO_LOOKUP_TIMEOUT_MS = 7_500;
+const DETAIL_TIMEOUT_MS = 3_500;
+const DETAIL_CONCURRENCY = 4;
+const MAX_SYSTEM_DETAILS = 12;
+const MAX_VIOLATION_LOOKUPS = 4;
+const VIOLATION_TIMEOUT_MS = 2_500;
+const historicalLeadById = new Map((leadsData as Lead[]).map((lead) => [lead.PWSID, lead]));
 
 /** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout. */
 async function efs<T = Record<string, unknown>>(
@@ -115,6 +124,71 @@ function normalizeCounty(input: string): string {
     .join(" ");
 }
 
+function countyVariants(input: string): string[] {
+  const base = normalizeCounty(input).replace(/\s+county$/i, "");
+  const variants = [base];
+
+  if (/^St\.?\s+/i.test(base)) variants.push(base.replace(/^St\.?\s+/i, "Saint "));
+  if (/^Saint\s+/i.test(base)) variants.push(base.replace(/^Saint\s+/i, "St. "));
+
+  return Array.from(new Set(variants.filter(Boolean)));
+}
+
+function mergeHistoricalLead(base: Lead, ws: Record<string, unknown>): Lead {
+  return {
+    ...base,
+    "System Name": str(ws, "pws_name", "PWS_NAME") || base["System Name"],
+    Type: str(ws, "pws_type_code", "PWS_TYPE_CODE") || base.Type,
+    "Population Served": num(ws, "population_served_count", "POPULATION_SERVED_COUNT") || base["Population Served"],
+    "Service Connections": num(ws, "service_connections_count", "SERVICE_CONNECTIONS_COUNT") || base["Service Connections"],
+    Source: str(ws, "primary_source_code", "PRIMARY_SOURCE_CODE") || base.Source,
+    "Owner Type": str(ws, "owner_type_code", "OWNER_TYPE_CODE") || base["Owner Type"],
+    City: str(ws, "city_name", "CITY_NAME") || base.City,
+    Zip: str(ws, "zip_code", "ZIP_CODE") || base.Zip,
+    Address: str(ws, "address_line1", "ADDRESS_LINE1") || base.Address,
+    Contact: str(ws, "org_name", "ORG_NAME") || base.Contact,
+    Phone: str(ws, "phone_number", "PHONE_NUMBER") || base.Phone,
+    Email: str(ws, "email_addr", "EMAIL_ADDR") || base.Email,
+  };
+}
+
+async function fetchGeoRows(state: string, county: string): Promise<Record<string, unknown>[]> {
+  let lastError: unknown;
+
+  for (const candidate of countyVariants(county)) {
+    try {
+      const rows = await efs<Record<string, unknown>>(
+        `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(candidate)}/PWS_ACTIVITY_CODE/A`,
+        300,
+        GEO_LOOKUP_TIMEOUT_MS,
+        0,
+      );
+      if (rows.length > 0) return rows;
+    } catch (error) {
+      lastError = error;
+      break;
+    }
+  }
+
+  if (lastError) throw lastError;
+  return [];
+}
+
+function prioritizePwsids(ids: string[]): string[] {
+  return [...ids].sort((a, b) => {
+    const scoreDiff = (historicalLeadById.get(b)?.["Lead Score"] ?? -1) - (historicalLeadById.get(a)?.["Lead Score"] ?? -1);
+    if (scoreDiff !== 0) return scoreDiff;
+    return a.localeCompare(b);
+  });
+}
+
+function buildLead(ws: Record<string, unknown>, vios: Record<string, unknown>[]): Lead {
+  const pwsid = str(ws, "pwsid", "PWSID");
+  const historical = historicalLeadById.get(pwsid);
+  if (historical && vios.length === 0) return mergeHistoricalLead(historical, ws);
+  return buildSystem(ws, vios);
+}
+
 /** Map an EPA WATER_SYSTEM row + a list of its violation rows into a scored Lead. */
 function buildSystem(
   ws: Record<string, unknown>,
@@ -185,75 +259,62 @@ function buildSystem(
 }
 
 async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
-  const countyName = normalizeCounty(county);
   const startedAt = Date.now();
-  const BUDGET_MS = 20_000; // total time budget for the whole EPA fetch
+  const geoRows = await fetchGeoRows(state, county);
 
-  // 1. Look up which PWSIDs actually serve this county via GEOGRAPHIC_AREA.
-  //    This is the only EPA table that has a usable county filter; the
-  //    PRINCIPAL_COUNTY_SERVED column on WATER_SYSTEM is silently ignored
-  //    by Envirofacts and returns the first 1000 rows of the state.
-  let geoRows: Record<string, unknown>[] = [];
-  try {
-    geoRows = await efs<Record<string, unknown>>(
-      `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(countyName)}/PWS_ACTIVITY_CODE/A`,
-      500,
-      10_000,
-      1,
-    );
-  } catch (e) {
-    console.error("GEOGRAPHIC_AREA lookup failed:", e);
-    throw e;
-  }
-
-  // De-duplicate PWSIDs (a system can have multiple geo rows: county + city + zip).
   const pwsidSet = new Set<string>();
   for (const g of geoRows) {
     const id = str(g, "pwsid", "PWSID");
     if (id) pwsidSet.add(id);
   }
-  const pwsids = Array.from(pwsidSet);
+  const pwsids = prioritizePwsids(Array.from(pwsidSet));
   if (pwsids.length === 0) return [];
 
-  // 2. Fetch WATER_SYSTEM details for each PWSID. Bounded concurrency.
-  //    Cap at 60 systems to stay well within the time budget.
-  const TOP_SYSTEMS = pwsids.slice(0, 60);
+  const leadById = new Map<string, Lead>();
+  for (const id of pwsids) {
+    const historical = historicalLeadById.get(id);
+    if (historical) leadById.set(id, historical);
+  }
+
   const wsById = new Map<string, Record<string, unknown>>();
-  await pMap(TOP_SYSTEMS, 6, async (id) => {
-    if (Date.now() - startedAt > BUDGET_MS - 6_000) return;
+  const detailIds = pwsids.slice(0, MAX_SYSTEM_DETAILS);
+  await pMap(detailIds, DETAIL_CONCURRENCY, async (id) => {
+    if (Date.now() - startedAt > EPA_FETCH_BUDGET_MS - 3_000) return;
     try {
-      const rows = await efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${id}`, 1, 5_000, 0);
-      if (rows[0]) wsById.set(id, rows[0]);
+      const rows = await efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${id}`, 1, DETAIL_TIMEOUT_MS, 0);
+      if (rows[0]) {
+        wsById.set(id, rows[0]);
+        leadById.set(id, buildLead(rows[0], []));
+      }
     } catch {
-      /* skip — system will be omitted */
+      const historical = historicalLeadById.get(id);
+      if (historical) leadById.set(id, historical);
     }
   });
 
-  if (wsById.size === 0) return [];
+  const remaining = EPA_FETCH_BUDGET_MS - (Date.now() - startedAt);
+  if (remaining > 2_500 && wsById.size > 0) {
+    const ids = Array.from(wsById.keys())
+      .sort((a, b) => {
+        const aLead = leadById.get(a);
+        const bLead = leadById.get(b);
+        return (bLead?.["Lead Score"] ?? 0) - (aLead?.["Lead Score"] ?? 0);
+      })
+      .slice(0, MAX_VIOLATION_LOOKUPS);
 
-  // 3. Pull violations only for the systems we successfully fetched and only
-  //    if there's time budget left. Systems without violation data still get
-  //    scored (zero-violation fallback).
-  const vioByPws = new Map<string, Record<string, unknown>[]>();
-  const remaining = BUDGET_MS - (Date.now() - startedAt);
-  if (remaining > 4_000) {
-    const ids = Array.from(wsById.keys()).slice(0, 25);
-    await pMap(ids, 4, async (id) => {
-      if (Date.now() - startedAt > BUDGET_MS) return;
+    await pMap(ids, 2, async (id) => {
+      if (Date.now() - startedAt > EPA_FETCH_BUDGET_MS) return;
       try {
-        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 4_000, 0);
-        vioByPws.set(id, vios);
+        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, VIOLATION_TIMEOUT_MS, 0);
+        const ws = wsById.get(id);
+        if (ws) leadById.set(id, buildLead(ws, vios));
       } catch {
-        vioByPws.set(id, []);
+        // Keep the no-violation fallback/historical score instead of failing the whole search.
       }
     });
-  } else {
-    console.warn("Skipping violations fetch — out of time budget");
   }
 
-  return Array.from(wsById.entries()).map(([id, ws]) =>
-    buildSystem(ws, vioByPws.get(id) || []),
-  );
+  return pwsids.map((id) => leadById.get(id)).filter((lead): lead is Lead => Boolean(lead));
 }
 
 export const searchCounty = createServerFn({ method: "POST" })
