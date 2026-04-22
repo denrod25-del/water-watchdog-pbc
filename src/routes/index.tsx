@@ -12,6 +12,7 @@ import { LeadMap } from "@/components/leads/LeadMap";
 import { LeadDetail } from "@/components/leads/LeadDetail";
 import { useLeadStore, type LeadStatus } from "@/components/leads/useLeadStatus";
 import { AuthBar } from "@/components/leads/AuthBar";
+import { CountySearch } from "@/components/leads/CountySearch";
 import { useAuth } from "@/hooks/useAuth";
 import { Toaster } from "@/components/ui/sonner";
 import { AlertOctagon, Beaker, Droplet, FileSpreadsheet, FileText, Loader2, ShieldAlert, Map as MapIcon, Table as TableIcon } from "lucide-react";
@@ -129,6 +130,8 @@ function Index() {
         </section>
 
         <Filters state={filters} setState={setFilters} total={ALL_LEADS.length} shown={filtered.length} />
+
+        <CountySearch onSelect={setSelected} />
 
         <div className="flex items-center justify-end">
           <div className="inline-flex rounded-xl border border-border bg-card p-1 shadow-sm">
