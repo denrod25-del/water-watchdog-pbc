@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      county_search_cache: {
+        Row: {
+          county_name: string
+          created_at: string
+          expires_at: string
+          fetched_at: string
+          id: string
+          results: Json
+          state_code: string
+          system_count: number
+          updated_at: string
+        }
+        Insert: {
+          county_name: string
+          created_at?: string
+          expires_at?: string
+          fetched_at?: string
+          id?: string
+          results?: Json
+          state_code: string
+          system_count?: number
+          updated_at?: string
+        }
+        Update: {
+          county_name?: string
+          created_at?: string
+          expires_at?: string
+          fetched_at?: string
+          id?: string
+          results?: Json
+          state_code?: string
+          system_count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       lead_pipeline: {
         Row: {
           created_at: string
