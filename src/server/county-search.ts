@@ -259,75 +259,62 @@ function buildSystem(
 }
 
 async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
-  const countyName = normalizeCounty(county);
   const startedAt = Date.now();
-  const BUDGET_MS = 20_000; // total time budget for the whole EPA fetch
+  const geoRows = await fetchGeoRows(state, county);
 
-  // 1. Look up which PWSIDs actually serve this county via GEOGRAPHIC_AREA.
-  //    This is the only EPA table that has a usable county filter; the
-  //    PRINCIPAL_COUNTY_SERVED column on WATER_SYSTEM is silently ignored
-  //    by Envirofacts and returns the first 1000 rows of the state.
-  let geoRows: Record<string, unknown>[] = [];
-  try {
-    geoRows = await efs<Record<string, unknown>>(
-      `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(countyName)}/PWS_ACTIVITY_CODE/A`,
-      500,
-      10_000,
-      1,
-    );
-  } catch (e) {
-    console.error("GEOGRAPHIC_AREA lookup failed:", e);
-    throw e;
-  }
-
-  // De-duplicate PWSIDs (a system can have multiple geo rows: county + city + zip).
   const pwsidSet = new Set<string>();
   for (const g of geoRows) {
     const id = str(g, "pwsid", "PWSID");
     if (id) pwsidSet.add(id);
   }
-  const pwsids = Array.from(pwsidSet);
+  const pwsids = prioritizePwsids(Array.from(pwsidSet));
   if (pwsids.length === 0) return [];
 
-  // 2. Fetch WATER_SYSTEM details for each PWSID. Bounded concurrency.
-  //    Cap at 60 systems to stay well within the time budget.
-  const TOP_SYSTEMS = pwsids.slice(0, 60);
+  const leadById = new Map<string, Lead>();
+  for (const id of pwsids) {
+    const historical = historicalLeadById.get(id);
+    if (historical) leadById.set(id, historical);
+  }
+
   const wsById = new Map<string, Record<string, unknown>>();
-  await pMap(TOP_SYSTEMS, 6, async (id) => {
-    if (Date.now() - startedAt > BUDGET_MS - 6_000) return;
+  const detailIds = pwsids.slice(0, MAX_SYSTEM_DETAILS);
+  await pMap(detailIds, DETAIL_CONCURRENCY, async (id) => {
+    if (Date.now() - startedAt > EPA_FETCH_BUDGET_MS - 3_000) return;
     try {
-      const rows = await efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${id}`, 1, 5_000, 0);
-      if (rows[0]) wsById.set(id, rows[0]);
+      const rows = await efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${id}`, 1, DETAIL_TIMEOUT_MS, 0);
+      if (rows[0]) {
+        wsById.set(id, rows[0]);
+        leadById.set(id, buildLead(rows[0], []));
+      }
     } catch {
-      /* skip — system will be omitted */
+      const historical = historicalLeadById.get(id);
+      if (historical) leadById.set(id, historical);
     }
   });
 
-  if (wsById.size === 0) return [];
+  const remaining = EPA_FETCH_BUDGET_MS - (Date.now() - startedAt);
+  if (remaining > 2_500 && wsById.size > 0) {
+    const ids = Array.from(wsById.keys())
+      .sort((a, b) => {
+        const aLead = leadById.get(a);
+        const bLead = leadById.get(b);
+        return (bLead?.["Lead Score"] ?? 0) - (aLead?.["Lead Score"] ?? 0);
+      })
+      .slice(0, MAX_VIOLATION_LOOKUPS);
 
-  // 3. Pull violations only for the systems we successfully fetched and only
-  //    if there's time budget left. Systems without violation data still get
-  //    scored (zero-violation fallback).
-  const vioByPws = new Map<string, Record<string, unknown>[]>();
-  const remaining = BUDGET_MS - (Date.now() - startedAt);
-  if (remaining > 4_000) {
-    const ids = Array.from(wsById.keys()).slice(0, 25);
-    await pMap(ids, 4, async (id) => {
-      if (Date.now() - startedAt > BUDGET_MS) return;
+    await pMap(ids, 2, async (id) => {
+      if (Date.now() - startedAt > EPA_FETCH_BUDGET_MS) return;
       try {
-        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, 4_000, 0);
-        vioByPws.set(id, vios);
+        const vios = await efs<Record<string, unknown>>(`VIOLATION/PWSID/${id}`, 100, VIOLATION_TIMEOUT_MS, 0);
+        const ws = wsById.get(id);
+        if (ws) leadById.set(id, buildLead(ws, vios));
       } catch {
-        vioByPws.set(id, []);
+        // Keep the no-violation fallback/historical score instead of failing the whole search.
       }
     });
-  } else {
-    console.warn("Skipping violations fetch — out of time budget");
   }
 
-  return Array.from(wsById.entries()).map(([id, ws]) =>
-    buildSystem(ws, vioByPws.get(id) || []),
-  );
+  return pwsids.map((id) => leadById.get(id)).filter((lead): lead is Lead => Boolean(lead));
 }
 
 export const searchCounty = createServerFn({ method: "POST" })
