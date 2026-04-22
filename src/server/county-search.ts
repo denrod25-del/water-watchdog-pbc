@@ -260,7 +260,7 @@ export const searchCounty = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }): Promise<CountySearchResult> => {
     const state = data.state.toUpperCase();
-    const county = data.county.trim();
+    const county = normalizeCounty(data.county);
 
     // 1. Cache lookup
     if (!data.forceRefresh) {
