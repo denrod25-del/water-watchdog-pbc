@@ -1,7 +1,8 @@
+import { Link } from "@tanstack/react-router";
 import { PriorityBadge } from "./PriorityBadge";
 import { ScoreBar } from "./Sparkline";
 import { formatNumber, formatPhone, type Lead } from "@/lib/format";
-import { AlertCircle, Phone } from "lucide-react";
+import { AlertCircle, ExternalLink, Phone } from "lucide-react";
 import type { LeadStatus } from "./useLeadStatus";
 
 const STATUS_DOT: Record<LeadStatus, string> = {
@@ -56,7 +57,15 @@ export function LeadTable({
                 >
                   <td className="px-4 py-3 align-top"><PriorityBadge priority={l.Priority} /></td>
                   <td className="max-w-[260px] px-4 py-3 align-top">
-                    <p className="font-semibold text-foreground">{l["System Name"]}</p>
+                    <Link
+                      to="/leads/$pwsid"
+                      params={{ pwsid: l.PWSID }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="group inline-flex items-center gap-1 font-semibold text-foreground hover:text-primary"
+                    >
+                      {l["System Name"]}
+                      <ExternalLink className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                    </Link>
                     <p className="font-mono text-[10px] text-muted-foreground">{l.PWSID}</p>
                   </td>
                   <td className="px-4 py-3 align-top text-foreground">{l.City || "—"}</td>
