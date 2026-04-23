@@ -4,6 +4,7 @@ import leadsData from "@/data/leads.json";
 import { formatNumber, formatPhone, PWS_TYPE_LABEL, SOURCE_LABEL, type Lead } from "@/lib/format";
 import { PriorityBadge } from "@/components/leads/PriorityBadge";
 import { ProductMatcher } from "@/components/leads/ProductMatcher";
+import { ViolationHistory } from "@/components/leads/ViolationHistory";
 import { useLeadStore, type LeadStatus } from "@/components/leads/useLeadStatus";
 import { useAuth } from "@/hooks/useAuth";
 import { recommendProducts } from "@/lib/matcher";
@@ -187,6 +188,8 @@ function LeadDetailsPage() {
           <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Recommended filtration</h2>
           <ProductMatcher lead={lead} />
         </section>
+
+        <ViolationHistory pwsid={lead.PWSID} />
 
         <section className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2 rounded-2xl border border-border bg-card p-4">
