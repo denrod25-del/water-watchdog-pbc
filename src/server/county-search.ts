@@ -157,13 +157,23 @@ async function fetchGeoRows(state: string, county: string): Promise<Record<strin
 
   for (const candidate of countyVariants(county)) {
     try {
+      // NOTE: Do NOT chain `/PWS_ACTIVITY_CODE/A` onto this URL — EPA Envirofacts
+      // returns `{"error": "'NoneType' object has no attribute 'get'"}` for that
+      // combination on many counties (e.g. FL/Palm Beach has 71 rows but the
+      // 4-filter form errors out). Filter activity status locally instead.
       const rows = await efs<Record<string, unknown>>(
-        `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(candidate)}/PWS_ACTIVITY_CODE/A`,
+        `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(candidate)}`,
         300,
         GEO_LOOKUP_TIMEOUT_MS,
         0,
       );
-      if (rows.length > 0) return rows;
+      const active = rows.filter((r) => {
+        const code = str(r, "pws_activity_code", "PWS_ACTIVITY_CODE").toUpperCase();
+        // "A" = Active. Empty/unknown -> keep (defensive).
+        return code === "" || code === "A";
+      });
+      if (active.length > 0) return active;
+      if (rows.length > 0) return rows; // fall back to all rows if none flagged active
     } catch (error) {
       lastError = error;
       break;
