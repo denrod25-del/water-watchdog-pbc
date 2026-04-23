@@ -31,14 +31,19 @@ const MAX_VIOLATION_LOOKUPS = 4;
 const VIOLATION_TIMEOUT_MS = 2_500;
 const historicalLeadById = new Map((leadsData as Lead[]).map((lead) => [lead.PWSID, lead]));
 
-/** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout. */
+/** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout.
+ *  EPA returns plain JSON arrays on success, and `{"error": "..."}` objects on transient
+ *  failures (which happen often, especially on larger ROWS ranges). We treat the latter
+ *  as a soft failure and surface it via `epaError` so callers can retry differently. */
 async function efs<T = Record<string, unknown>>(
   path: string,
   max = 500,
   timeoutMs = 8_000,
   retries = 1,
 ): Promise<T[]> {
-  const url = `${EFS_BASE}/${path}/ROWS/0:${max - 1}/JSON`;
+  // EPA Envirofacts intermittently 500s on ROWS/0:N where N>~99 — cap at 99 per request.
+  const safeMax = Math.min(max, 100);
+  const url = `${EFS_BASE}/${path}/ROWS/0:${safeMax - 1}/JSON`;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -49,10 +54,18 @@ async function efs<T = Record<string, unknown>>(
       if (!res.ok) throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
       const text = await res.text();
       if (!text.trim()) return [];
-      // EPA sometimes returns a JSON error object like {"error": "..."} instead of an array.
       try {
         const json = JSON.parse(text);
         if (Array.isArray(json)) return json as T[];
+        // {"error": "..."} → soft failure; retry, then give up with empty.
+        if (json && typeof json === "object" && "error" in json) {
+          lastErr = new Error(`EPA error: ${(json as { error: string }).error}`);
+          if (attempt < retries) {
+            await new Promise((r) => setTimeout(r, 600 + attempt * 400));
+            continue;
+          }
+          return [];
+        }
         return [];
       } catch {
         // Non-JSON (often an XML error page) — treat as empty.
