@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const EFS_BASE = "https://data.epa.gov/efservice";
 const FETCH_TIMEOUT_MS = 8_000;
@@ -155,6 +156,7 @@ async function loadContaminantNames(codes: string[]): Promise<Map<string, string
 }
 
 export const fetchViolationHistory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }): Promise<ViolationHistoryResult> => {
     const { pwsid } = data;
