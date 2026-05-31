@@ -29,14 +29,18 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "Water Watchdog PBC" },
+      { name: "description", content: "Water Watchdog PBC identifies water systems with violations and lead/copper issues for lead generation." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "Water Watchdog PBC" },
+      { property: "og:description", content: "Water Watchdog PBC identifies water systems with violations and lead/copper issues for lead generation." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Water Watchdog PBC" },
+      { name: "twitter:description", content: "Water Watchdog PBC identifies water systems with violations and lead/copper issues for lead generation." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/14bafee6-b5c6-4845-94b4-67efca1ed6c0/id-preview-8f1319d8--92be8627-2ad3-457c-bc92-175e486d03e4.lovable.app-1780248990306.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/14bafee6-b5c6-4845-94b4-67efca1ed6c0/id-preview-8f1319d8--92be8627-2ad3-457c-bc92-175e486d03e4.lovable.app-1780248990306.png" },
     ],
     links: [
       {
