@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { scoreSystem, type RawSystem } from "@/lib/score";
 import type { Lead } from "@/lib/format";
 import leadsData from "@/data/leads.json";
@@ -341,6 +342,7 @@ async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
 }
 
 export const searchCounty = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }): Promise<CountySearchResult> => {
     const state = data.state.toUpperCase();
