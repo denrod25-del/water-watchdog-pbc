@@ -11,6 +11,9 @@ import { recommendProducts } from "@/lib/matcher";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { useServerFn } from "@tanstack/react-start";
+import { fetchViolationHistory } from "@/server/violation-history";
+import { downloadViolationReport } from "@/lib/violation-report";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,6 +21,7 @@ import {
   Calendar,
   Copy,
   Droplet,
+  FileDown,
   FlaskConical,
   Loader2,
   Mail,
@@ -70,6 +74,8 @@ function LeadDetailsPage() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const { store, update } = useLeadStore();
+  const fetchViolations = useServerFn(fetchViolationHistory);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/auth" });
@@ -114,6 +120,25 @@ function LeadDetailsPage() {
     const pitch = `Hi ${lead.Contact || "team"} at ${lead["System Name"]},\n\nEPA SDWIS records show ${flags.length ? flags.join(", ") + "." : "compliance issues with your system."} We help water systems serving ${formatNumber(lead["Population Served"])} people deliver compliant, clean water with point-of-entry and point-of-use filtration.${productLine}\n\nCould we schedule 15 minutes to walk through options?`;
     navigator.clipboard.writeText(pitch);
     toast.success("Outreach pitch copied");
+  };
+
+  const downloadReport = async () => {
+    if (!lead) return;
+    setDownloading(true);
+    try {
+      const res = await fetchViolations({ data: { pwsid: lead.PWSID } });
+      downloadViolationReport(lead, res.violations);
+      toast.success(
+        res.violations.length
+          ? `Report downloaded · ${res.violations.length} violation${res.violations.length === 1 ? "" : "s"}`
+          : "Report downloaded · no violations on file",
+      );
+      if (res.error) toast.warning(res.error);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate report");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -244,6 +269,10 @@ function LeadDetailsPage() {
         <div className="flex flex-wrap gap-2">
           <Button onClick={copyPitch} className="gap-2">
             <Copy className="h-4 w-4" /> Copy outreach pitch
+          </Button>
+          <Button onClick={downloadReport} disabled={downloading} variant="secondary" className="gap-2">
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+            {downloading ? "Generating PDF…" : "Download violation report"}
           </Button>
           {lead.Phone && (
             <Button asChild variant="secondary" className="gap-2">
