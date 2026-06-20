@@ -286,11 +286,6 @@ async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
   if (pwsids.length === 0) return [];
 
   const leadById = new Map<string, Lead>();
-  for (const id of pwsids) {
-    const historical = historicalLeadById.get(id);
-    if (historical) leadById.set(id, historical);
-  }
-
   const wsById = new Map<string, Record<string, unknown>>();
   const detailIds = pwsids.slice(0, MAX_SYSTEM_DETAILS);
   await pMap(detailIds, DETAIL_CONCURRENCY, async (id) => {
@@ -302,8 +297,7 @@ async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
         leadById.set(id, buildLead(rows[0], []));
       }
     } catch {
-      const historical = historicalLeadById.get(id);
-      if (historical) leadById.set(id, historical);
+      // Skip systems where the EPA detail call failed; they'll just be omitted.
     }
   });
 
