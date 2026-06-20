@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { searchCounty } from "@/server/county-search";
+import { searchCounty } from "@/lib/county-search.functions";
 import { US_STATES } from "@/lib/score";
 import type { Lead } from "@/lib/format";
 import { LeadTable } from "./LeadTable";
