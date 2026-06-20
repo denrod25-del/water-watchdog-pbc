@@ -146,24 +146,6 @@ function countyVariants(input: string): string[] {
   return Array.from(new Set(variants.filter(Boolean)));
 }
 
-function mergeHistoricalLead(base: Lead, ws: Record<string, unknown>): Lead {
-  return {
-    ...base,
-    "System Name": str(ws, "pws_name", "PWS_NAME") || base["System Name"],
-    Type: str(ws, "pws_type_code", "PWS_TYPE_CODE") || base.Type,
-    "Population Served": num(ws, "population_served_count", "POPULATION_SERVED_COUNT") || base["Population Served"],
-    "Service Connections": num(ws, "service_connections_count", "SERVICE_CONNECTIONS_COUNT") || base["Service Connections"],
-    Source: str(ws, "primary_source_code", "PRIMARY_SOURCE_CODE") || base.Source,
-    "Owner Type": str(ws, "owner_type_code", "OWNER_TYPE_CODE") || base["Owner Type"],
-    City: str(ws, "city_name", "CITY_NAME") || base.City,
-    Zip: str(ws, "zip_code", "ZIP_CODE") || base.Zip,
-    Address: str(ws, "address_line1", "ADDRESS_LINE1") || base.Address,
-    Contact: str(ws, "org_name", "ORG_NAME") || base.Contact,
-    Phone: str(ws, "phone_number", "PHONE_NUMBER") || base.Phone,
-    Email: str(ws, "email_addr", "EMAIL_ADDR") || base.Email,
-  };
-}
-
 async function fetchGeoRows(state: string, county: string): Promise<Record<string, unknown>[]> {
   let lastError: unknown;
 
