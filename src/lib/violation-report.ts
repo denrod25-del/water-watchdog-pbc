@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { Lead } from "@/lib/format";
-import type { ViolationRecord } from "@/server/violation-history";
+import type { ViolationRecord } from "@/lib/violation-history.functions";
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";

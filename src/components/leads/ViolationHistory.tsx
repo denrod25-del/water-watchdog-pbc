@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { fetchViolationHistory, type ViolationRecord } from "@/server/violation-history";
+import { fetchViolationHistory, type ViolationRecord } from "@/lib/violation-history.functions";
 import { AlertTriangle, CalendarClock, FlaskConical, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
