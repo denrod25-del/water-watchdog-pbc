@@ -386,3 +386,26 @@ export const searchCounty = createServerFn({ method: "POST" })
       source: "epa-sdwis",
     };
   });
+
+const PwsidInput = z.object({ pwsid: z.string().regex(/^[A-Z0-9]{4,20}$/) });
+
+/** Fetch a single water system + violations live from EPA SDWIS. */
+export const fetchLead = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => PwsidInput.parse(input))
+  .handler(async ({ data }): Promise<{ lead: Lead | null; fetchedAt: string }> => {
+    const pwsid = data.pwsid.toUpperCase();
+    try {
+      const [wsRows, vios] = await Promise.all([
+        efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${pwsid}`, 1, DETAIL_TIMEOUT_MS, 1),
+        efs<Record<string, unknown>>(`VIOLATION/PWSID/${pwsid}`, 100, VIOLATION_TIMEOUT_MS, 1).catch(() => []),
+      ]);
+      const ws = wsRows[0];
+      if (!ws) return { lead: null, fetchedAt: new Date().toISOString() };
+      return { lead: buildLead(ws, vios), fetchedAt: new Date().toISOString() };
+    } catch (err) {
+      throw new Error(
+        `Could not reach EPA SDWIS for ${pwsid}. ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
+  });
