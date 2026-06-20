@@ -4,7 +4,6 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { scoreSystem, type RawSystem } from "@/lib/score";
 import type { Lead } from "@/lib/format";
-import leadsData from "@/data/leads.json";
 
 const InputSchema = z.object({
   state: z.string().length(2).regex(/^[A-Z]{2}$/),
@@ -30,7 +29,6 @@ const DETAIL_CONCURRENCY = 4;
 const MAX_SYSTEM_DETAILS = 12;
 const MAX_VIOLATION_LOOKUPS = 4;
 const VIOLATION_TIMEOUT_MS = 2_500;
-const historicalLeadById = new Map((leadsData as Lead[]).map((lead) => [lead.PWSID, lead]));
 
 /** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout.
  *  EPA returns plain JSON arrays on success, and `{"error": "..."}` objects on transient
@@ -199,17 +197,10 @@ async function fetchGeoRows(state: string, county: string): Promise<Record<strin
 }
 
 function prioritizePwsids(ids: string[]): string[] {
-  return [...ids].sort((a, b) => {
-    const scoreDiff = (historicalLeadById.get(b)?.["Lead Score"] ?? -1) - (historicalLeadById.get(a)?.["Lead Score"] ?? -1);
-    if (scoreDiff !== 0) return scoreDiff;
-    return a.localeCompare(b);
-  });
+  return [...ids].sort((a, b) => a.localeCompare(b));
 }
 
 function buildLead(ws: Record<string, unknown>, vios: Record<string, unknown>[]): Lead {
-  const pwsid = str(ws, "pwsid", "PWSID");
-  const historical = historicalLeadById.get(pwsid);
-  if (historical && vios.length === 0) return mergeHistoricalLead(historical, ws);
   return buildSystem(ws, vios);
 }
 
