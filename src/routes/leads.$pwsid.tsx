@@ -1,6 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import leadsData from "@/data/leads.json";
+import { useEffect, useState } from "react";
 import { formatNumber, formatPhone, PWS_TYPE_LABEL, SOURCE_LABEL, type Lead } from "@/lib/format";
 import { PriorityBadge } from "@/components/leads/PriorityBadge";
 import { ProductMatcher } from "@/components/leads/ProductMatcher";
@@ -13,6 +12,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
 import { fetchViolationHistory } from "@/server/violation-history";
+import { fetchLead } from "@/server/county-search";
 import { downloadViolationReport } from "@/lib/violation-report";
 import {
   AlertTriangle,
@@ -30,8 +30,6 @@ import {
   Users,
 } from "lucide-react";
 
-const ALL_LEADS = leadsData as Lead[];
-
 const STATUS_ORDER: LeadStatus[] = ["new", "contacted", "qualified", "won", "lost"];
 const STATUS_LABEL: Record<LeadStatus, string> = {
   new: "New",
@@ -43,13 +41,8 @@ const STATUS_LABEL: Record<LeadStatus, string> = {
 
 export const Route = createFileRoute("/leads/$pwsid")({
   head: ({ params }) => {
-    const lead = ALL_LEADS.find((l) => l.PWSID === params.pwsid);
-    const title = lead
-      ? `${lead["System Name"]} — Water system details`
-      : "Water system details";
-    const description = lead
-      ? `Compliance profile, lead/copper indicators, and recommended filtration for ${lead["System Name"]} (PWSID ${lead.PWSID}).`
-      : "Water system compliance and filtration recommendations.";
+    const title = `Water system ${params.pwsid} — Compliance details`;
+    const description = `Live EPA SDWIS compliance profile, lead/copper indicators, and filtration recommendations for PWSID ${params.pwsid}.`;
     return {
       meta: [
         { title },
@@ -75,13 +68,35 @@ function LeadDetailsPage() {
   const { user, loading: authLoading } = useAuth();
   const { store, update } = useLeadStore();
   const fetchViolations = useServerFn(fetchViolationHistory);
+  const fetchOne = useServerFn(fetchLead);
   const [downloading, setDownloading] = useState(false);
+  const [lead, setLead] = useState<Lead | null>(null);
+  const [loadingLead, setLoadingLead] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/auth" });
   }, [authLoading, user, navigate]);
 
-  const lead = useMemo(() => ALL_LEADS.find((l) => l.PWSID === pwsid) ?? null, [pwsid]);
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setLoadingLead(true);
+    setLoadError(null);
+    fetchOne({ data: { pwsid } })
+      .then((r) => {
+        if (cancelled) return;
+        setLead(r.lead);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setLoadError(e instanceof Error ? e.message : "Failed to load system");
+      })
+      .finally(() => !cancelled && setLoadingLead(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [pwsid, user, fetchOne]);
 
   if (authLoading || !user) {
     return (
@@ -94,11 +109,24 @@ function LeadDetailsPage() {
     );
   }
 
+  if (loadingLead) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading live EPA SDWIS data for {pwsid}…
+        </div>
+      </div>
+    );
+  }
+
   if (!lead) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background p-8 text-center">
         <h1 className="text-2xl font-bold text-foreground">Water system not found</h1>
-        <p className="text-sm text-muted-foreground">No SDWIS record matches PWSID <span className="font-mono">{pwsid}</span>.</p>
+        <p className="text-sm text-muted-foreground">
+          {loadError ?? <>No SDWIS record matches PWSID <span className="font-mono">{pwsid}</span>.</>}
+        </p>
         <Link to="/" className="text-sm font-semibold text-primary hover:underline">← Back to leads</Link>
       </div>
     );

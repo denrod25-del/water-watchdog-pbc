@@ -4,7 +4,6 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { scoreSystem, type RawSystem } from "@/lib/score";
 import type { Lead } from "@/lib/format";
-import leadsData from "@/data/leads.json";
 
 const InputSchema = z.object({
   state: z.string().length(2).regex(/^[A-Z]{2}$/),
@@ -30,7 +29,6 @@ const DETAIL_CONCURRENCY = 4;
 const MAX_SYSTEM_DETAILS = 12;
 const MAX_VIOLATION_LOOKUPS = 4;
 const VIOLATION_TIMEOUT_MS = 2_500;
-const historicalLeadById = new Map((leadsData as Lead[]).map((lead) => [lead.PWSID, lead]));
 
 /** Fetch a JSON table from EPA Envirofacts with a row-range cap and per-request timeout.
  *  EPA returns plain JSON arrays on success, and `{"error": "..."}` objects on transient
@@ -148,24 +146,6 @@ function countyVariants(input: string): string[] {
   return Array.from(new Set(variants.filter(Boolean)));
 }
 
-function mergeHistoricalLead(base: Lead, ws: Record<string, unknown>): Lead {
-  return {
-    ...base,
-    "System Name": str(ws, "pws_name", "PWS_NAME") || base["System Name"],
-    Type: str(ws, "pws_type_code", "PWS_TYPE_CODE") || base.Type,
-    "Population Served": num(ws, "population_served_count", "POPULATION_SERVED_COUNT") || base["Population Served"],
-    "Service Connections": num(ws, "service_connections_count", "SERVICE_CONNECTIONS_COUNT") || base["Service Connections"],
-    Source: str(ws, "primary_source_code", "PRIMARY_SOURCE_CODE") || base.Source,
-    "Owner Type": str(ws, "owner_type_code", "OWNER_TYPE_CODE") || base["Owner Type"],
-    City: str(ws, "city_name", "CITY_NAME") || base.City,
-    Zip: str(ws, "zip_code", "ZIP_CODE") || base.Zip,
-    Address: str(ws, "address_line1", "ADDRESS_LINE1") || base.Address,
-    Contact: str(ws, "org_name", "ORG_NAME") || base.Contact,
-    Phone: str(ws, "phone_number", "PHONE_NUMBER") || base.Phone,
-    Email: str(ws, "email_addr", "EMAIL_ADDR") || base.Email,
-  };
-}
-
 async function fetchGeoRows(state: string, county: string): Promise<Record<string, unknown>[]> {
   let lastError: unknown;
 
@@ -199,17 +179,10 @@ async function fetchGeoRows(state: string, county: string): Promise<Record<strin
 }
 
 function prioritizePwsids(ids: string[]): string[] {
-  return [...ids].sort((a, b) => {
-    const scoreDiff = (historicalLeadById.get(b)?.["Lead Score"] ?? -1) - (historicalLeadById.get(a)?.["Lead Score"] ?? -1);
-    if (scoreDiff !== 0) return scoreDiff;
-    return a.localeCompare(b);
-  });
+  return [...ids].sort((a, b) => a.localeCompare(b));
 }
 
 function buildLead(ws: Record<string, unknown>, vios: Record<string, unknown>[]): Lead {
-  const pwsid = str(ws, "pwsid", "PWSID");
-  const historical = historicalLeadById.get(pwsid);
-  if (historical && vios.length === 0) return mergeHistoricalLead(historical, ws);
   return buildSystem(ws, vios);
 }
 
@@ -295,11 +268,6 @@ async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
   if (pwsids.length === 0) return [];
 
   const leadById = new Map<string, Lead>();
-  for (const id of pwsids) {
-    const historical = historicalLeadById.get(id);
-    if (historical) leadById.set(id, historical);
-  }
-
   const wsById = new Map<string, Record<string, unknown>>();
   const detailIds = pwsids.slice(0, MAX_SYSTEM_DETAILS);
   await pMap(detailIds, DETAIL_CONCURRENCY, async (id) => {
@@ -311,8 +279,7 @@ async function fetchFromEpa(state: string, county: string): Promise<Lead[]> {
         leadById.set(id, buildLead(rows[0], []));
       }
     } catch {
-      const historical = historicalLeadById.get(id);
-      if (historical) leadById.set(id, historical);
+      // Skip systems where the EPA detail call failed; they'll just be omitted.
     }
   });
 
@@ -418,4 +385,27 @@ export const searchCounty = createServerFn({ method: "POST" })
       cached: false,
       source: "epa-sdwis",
     };
+  });
+
+const PwsidInput = z.object({ pwsid: z.string().regex(/^[A-Z0-9]{4,20}$/) });
+
+/** Fetch a single water system + violations live from EPA SDWIS. */
+export const fetchLead = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => PwsidInput.parse(input))
+  .handler(async ({ data }): Promise<{ lead: Lead | null; fetchedAt: string }> => {
+    const pwsid = data.pwsid.toUpperCase();
+    try {
+      const [wsRows, vios] = await Promise.all([
+        efs<Record<string, unknown>>(`WATER_SYSTEM/PWSID/${pwsid}`, 1, DETAIL_TIMEOUT_MS, 1),
+        efs<Record<string, unknown>>(`VIOLATION/PWSID/${pwsid}`, 100, VIOLATION_TIMEOUT_MS, 1).catch(() => []),
+      ]);
+      const ws = wsRows[0];
+      if (!ws) return { lead: null, fetchedAt: new Date().toISOString() };
+      return { lead: buildLead(ws, vios), fetchedAt: new Date().toISOString() };
+    } catch (err) {
+      throw new Error(
+        `Could not reach EPA SDWIS for ${pwsid}. ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
   });
