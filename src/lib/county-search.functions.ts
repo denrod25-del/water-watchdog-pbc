@@ -325,7 +325,8 @@ export const searchCounty = createServerFn({ method: "POST" })
         .gt("expires_at", new Date().toISOString())
         .maybeSingle();
 
-      if (cached) {
+      // Ignore poisoned cache entries from previous failed EPA fetches.
+      if (cached && (cached.system_count ?? 0) > 0) {
         return {
           state,
           county,
@@ -361,8 +362,10 @@ export const searchCounty = createServerFn({ method: "POST" })
     const now = new Date();
     const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    // 4. Upsert cache (service role, bypasses RLS)
-    await supabaseAdmin
+    // 4. Upsert cache (service role, bypasses RLS). Skip empty results so a
+    //    transient EPA failure doesn't poison the cache for 7 days.
+    if (systems.length > 0) {
+      await supabaseAdmin
       .from("county_search_cache")
       .upsert(
         {
@@ -375,6 +378,7 @@ export const searchCounty = createServerFn({ method: "POST" })
         },
         { onConflict: "state_code,county_name" },
       );
+    }
 
     return {
       state,
