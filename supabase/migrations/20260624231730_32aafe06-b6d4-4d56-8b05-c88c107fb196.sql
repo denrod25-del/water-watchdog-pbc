@@ -1,0 +1,1 @@
+DELETE FROM public.county_search_cache WHERE system_count = 0;
