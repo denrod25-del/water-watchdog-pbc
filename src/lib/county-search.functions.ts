@@ -50,14 +50,21 @@ async function efs<T = Record<string, unknown>>(
         headers: { Accept: "application/json", "User-Agent": "WaterLeads/1.0" },
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (!res.ok) throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
+      if (!res.ok) {
+        console.error(`[efs] ${res.status} attempt=${attempt} ${url}`);
+        throw new Error(`EPA Envirofacts ${res.status}: ${path}`);
+      }
       const text = await res.text();
-      if (!text.trim()) return [];
+      if (!text.trim()) {
+        console.error(`[efs] empty body attempt=${attempt} ${url}`);
+        return [];
+      }
       try {
         const json = JSON.parse(text);
         if (Array.isArray(json)) return json as T[];
         // {"error": "..."} → soft failure; retry, then give up with empty.
         if (json && typeof json === "object" && "error" in json) {
+          console.error(`[efs] EPA soft-error attempt=${attempt} ${url} :: ${(json as { error: string }).error}`);
           lastErr = new Error(`EPA error: ${(json as { error: string }).error}`);
           if (attempt < retries) {
             await new Promise((r) => setTimeout(r, 600 + attempt * 400));
@@ -65,13 +72,16 @@ async function efs<T = Record<string, unknown>>(
           }
           return [];
         }
+        console.error(`[efs] unexpected JSON shape attempt=${attempt} ${url}`);
         return [];
-      } catch {
+      } catch (parseErr) {
         // Non-JSON (often an XML error page) — treat as empty.
+        console.error(`[efs] non-JSON attempt=${attempt} ${url} :: ${parseErr instanceof Error ? parseErr.message : parseErr}`);
         return [];
       }
     } catch (e) {
       lastErr = e;
+      console.error(`[efs] fetch error attempt=${attempt} ${url} :: ${e instanceof Error ? e.message : e}`);
       if (attempt < retries) await new Promise((r) => setTimeout(r, 500));
     }
   }
