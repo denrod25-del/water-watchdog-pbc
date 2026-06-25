@@ -161,7 +161,7 @@ async function fetchGeoRows(state: string, county: string): Promise<Record<strin
         `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(candidate)}`,
         99,
         GEO_LOOKUP_TIMEOUT_MS,
-        2,
+        3,
       );
       const active = rows.filter((r) => {
         const code = str(r, "pws_activity_code", "PWS_ACTIVITY_CODE").toUpperCase();
