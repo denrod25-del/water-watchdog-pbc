@@ -60,19 +60,21 @@ async function efs<T = Record<string, unknown>>(
         if (json && typeof json === "object" && "error" in json) {
           lastErr = new Error(`EPA error: ${(json as { error: string }).error}`);
           if (attempt < retries) {
-            await new Promise((r) => setTimeout(r, 600 + attempt * 400));
+            await new Promise((r) => setTimeout(r, 500 + attempt * 500));
             continue;
           }
-          return [];
+          throw lastErr;
         }
         return [];
-      } catch {
+      } catch (parseErr) {
+        // Re-throw EPA soft-error we just constructed
+        if (parseErr instanceof Error && parseErr.message.startsWith("EPA error:")) throw parseErr;
         // Non-JSON (often an XML error page) — treat as empty.
         return [];
       }
     } catch (e) {
       lastErr = e;
-      if (attempt < retries) await new Promise((r) => setTimeout(r, 500));
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 500 + attempt * 500));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
@@ -159,7 +161,7 @@ async function fetchGeoRows(state: string, county: string): Promise<Record<strin
         `GEOGRAPHIC_AREA/STATE_SERVED/${state}/COUNTY_SERVED/${encodeURIComponent(candidate)}`,
         99,
         GEO_LOOKUP_TIMEOUT_MS,
-        2,
+        3,
       );
       const active = rows.filter((r) => {
         const code = str(r, "pws_activity_code", "PWS_ACTIVITY_CODE").toUpperCase();
