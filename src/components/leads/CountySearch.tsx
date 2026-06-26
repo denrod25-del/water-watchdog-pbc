@@ -5,7 +5,7 @@ import { US_STATES } from "@/lib/score";
 import type { Lead } from "@/lib/format";
 import { LeadTable } from "./LeadTable";
 import { useLeadStore } from "./useLeadStatus";
-import { Globe2, Loader2, RefreshCw, Search, ServerCrash, Database } from "lucide-react";
+import { Globe2, Loader2, RefreshCw, Search, ServerCrash, Database, MapPinned, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -73,6 +73,17 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const tryAnother = () => {
+    setResult(null);
+    setError(null);
+    setCounty("");
+    // Focus the county input on next tick
+    setTimeout(() => {
+      const el = document.querySelector<HTMLInputElement>('input[placeholder^="County name"]');
+      el?.focus();
+    }, 0);
   };
 
   return (
@@ -172,14 +183,95 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
             </span>
           </div>
           {result.systems.length > 0 ? (
-            <LeadTable leads={result.systems} onSelect={onSelect} store={store} />
+            (() => {
+              const lcrSystems = result.systems.filter(
+                (s) =>
+                  (s["LCR Violations (5yr)"] ?? 0) > 0 ||
+                  (s["Active Health-Based Violations"] ?? 0) > 0 ||
+                  s.Priority === "HOT" ||
+                  s.Priority === "WARM",
+              );
+              if (lcrSystems.length === 0) {
+                return (
+                  <EmptyState
+                    icon={<Sparkles className="h-6 w-6 text-primary" />}
+                    title={`Good news — no lead or copper issues flagged in ${result.county}, ${result.state}`}
+                    body={
+                      <>
+                        We found <strong className="text-foreground">{result.systems.length}</strong> active
+                        water systems, but none have recent Lead &amp; Copper Rule violations or active
+                        health-based violations. That's a clean bill of health for this county.
+                      </>
+                    }
+                    hint="Try a neighboring county, or search a larger metro area to surface more replacement opportunities."
+                    onReset={tryAnother}
+                  >
+                    <LeadTable leads={result.systems} onSelect={onSelect} store={store} />
+                  </EmptyState>
+                );
+              }
+              return <LeadTable leads={result.systems} onSelect={onSelect} store={store} />;
+            })()
           ) : (
-            <p className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              No active public water systems found for this county.
-            </p>
+            <EmptyState
+              icon={<MapPinned className="h-6 w-6 text-primary" />}
+              title={`No active public water systems found in ${result.county}, ${result.state}`}
+              body={
+                <>
+                  EPA SDWIS doesn't list any active community water systems for this county. This usually
+                  means the county name is spelled differently in EPA's records, or residents are served by
+                  systems registered to a neighboring county.
+                </>
+              }
+              hint='Double-check spelling (e.g. "Miami-Dade", "St. Lucie", "DeKalb") or try an adjacent county.'
+              onReset={tryAnother}
+            />
           )}
         </div>
       )}
     </section>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  body,
+  hint,
+  onReset,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: React.ReactNode;
+  hint: string;
+  onReset: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+            {icon}
+          </div>
+          <div className="flex-1 space-y-2">
+            <h3 className="text-base font-semibold text-foreground">{title}</h3>
+            <p className="text-sm text-muted-foreground">{body}</p>
+            <p className="text-xs text-muted-foreground/80">{hint}</p>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={onReset}
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                <Search className="h-3.5 w-3.5" /> Try another county
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {children}
+    </div>
   );
 }
