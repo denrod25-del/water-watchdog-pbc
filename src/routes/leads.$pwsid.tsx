@@ -27,6 +27,7 @@ import {
   Mail,
   MapPin,
   Phone,
+  Share2,
   Users,
 } from "lucide-react";
 
@@ -169,6 +170,15 @@ function LeadDetailsPage() {
     }
   };
 
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success("Lead link copied to clipboard");
+    } catch {
+      toast.error("Could not copy link");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Toaster richColors position="top-right" />
@@ -301,6 +311,9 @@ function LeadDetailsPage() {
           <Button onClick={downloadReport} disabled={downloading} variant="secondary" className="gap-2">
             {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
             {downloading ? "Generating PDF…" : "Download violation report"}
+          </Button>
+          <Button onClick={copyShareLink} variant="outline" className="gap-2">
+            <Share2 className="h-4 w-4" /> Share lead link
           </Button>
           {lead.Phone && (
             <Button asChild variant="secondary" className="gap-2">
