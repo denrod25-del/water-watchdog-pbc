@@ -9,6 +9,28 @@ import { Globe2, Loader2, RefreshCw, Search, ServerCrash, Database } from "lucid
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 
+function LoadingState() {
+  return (
+    <div className="space-y-3 rounded-xl border border-dashed border-border p-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        Querying EPA Safe Drinking Water Information System…
+      </div>
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-6 w-16 rounded-md" />
+            <Skeleton className="h-6 flex-1 rounded-md" />
+            <Skeleton className="hidden h-6 w-24 rounded-md sm:block" />
+            <Skeleton className="hidden h-6 w-16 rounded-md sm:block" />
+            <Skeleton className="h-6 w-20 rounded-md" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type Result = {
   state: string;
   county: string;
