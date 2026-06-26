@@ -1,13 +1,52 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { searchCounty } from "@/lib/county-search.functions";
+import {
+  addSavedSearch,
+  listSavedSearches,
+  popularCountiesInState,
+  removeSavedSearch,
+  type SavedSearch,
+} from "@/lib/saved-searches.functions";
 import { US_STATES } from "@/lib/score";
 import type { Lead } from "@/lib/format";
 import { LeadTable } from "./LeadTable";
 import { useLeadStore } from "./useLeadStatus";
-import { Globe2, Loader2, RefreshCw, Search, ServerCrash, Database, MapPinned, Sparkles } from "lucide-react";
+import {
+  Bookmark,
+  BookmarkCheck,
+  Clock,
+  Compass,
+  Database,
+  Globe2,
+  Loader2,
+  MapPinned,
+  RefreshCw,
+  Search,
+  ServerCrash,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const RECENT_KEY = "wq-recent-county-searches-v1";
+type RecentEntry = { state: string; county: string; at: number };
+
+function readRecent(): RecentEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+function pushRecent(state: string, county: string) {
+  const next = [{ state, county, at: Date.now() }, ...readRecent().filter(
+    (r) => !(r.state === state && r.county.toLowerCase() === county.toLowerCase()),
+  )].slice(0, 8);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+}
 
 function LoadingState() {
   return (
@@ -46,19 +85,56 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [saved, setSaved] = useState<SavedSearch[]>([]);
+  const [suggestions, setSuggestions] = useState<{ county: string; systemCount: number }[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const { store } = useLeadStore();
   const search = useServerFn(searchCounty);
+  const listSaved = useServerFn(listSavedSearches);
+  const addSaved = useServerFn(addSavedSearch);
+  const removeSaved = useServerFn(removeSavedSearch);
+  const popular = useServerFn(popularCountiesInState);
 
-  const run = async (forceRefresh = false) => {
-    if (!county.trim()) {
-      setError("Enter a county name");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await search({ data: { state, county: county.trim(), forceRefresh } });
-      setResult(r);
+  useEffect(() => {
+    setRecent(readRecent());
+    listSaved().then(setSaved).catch(() => {});
+  }, [listSaved]);
+
+  // Suggestions: nearby/popular counties for current state
+  useEffect(() => {
+    let cancelled = false;
+    popular({ data: { state } })
+      .then((r) => { if (!cancelled) setSuggestions(r); })
+      .catch(() => { if (!cancelled) setSuggestions([]); });
+    return () => { cancelled = true; };
+  }, [state, popular, result]);
+
+  // "/" focuses the county input (unless typing in an input/textarea already)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA" && !t?.isContentEditable) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const runFor = useCallback(
+    async (st: string, co: string, forceRefresh = false) => {
+      setLoading(true);
+      setError(null);
+      setShowHistory(false);
+      try {
+        const r = await search({ data: { state: st, county: co.trim(), forceRefresh } });
+        setResult(r);
+        pushRecent(r.state, r.county);
+        setRecent(readRecent());
       if (r.systems.length === 0) {
         toast.warning(`No systems found for ${r.county}, ${r.state}`);
       } else {
@@ -73,17 +149,64 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
     } finally {
       setLoading(false);
     }
+    },
+    [search],
+  );
+
+  const run = (forceRefresh = false) => {
+    if (!county.trim()) {
+      setError("Enter a county name");
+      return;
+    }
+    return runFor(state, county, forceRefresh);
+  };
+
+  const jumpTo = (st: string, co: string) => {
+    setState(st);
+    setCounty(co);
+    runFor(st, co, false);
+  };
+
+  const isSaved = result
+    ? saved.some((s) => s.state === result.state && s.county.toLowerCase() === result.county.toLowerCase())
+    : false;
+
+  const toggleSave = async () => {
+    if (!result) return;
+    try {
+      if (isSaved) {
+        await removeSaved({ data: { state: result.state, county: result.county } });
+        toast.success(`Removed ${result.county}, ${result.state} from saved`);
+      } else {
+        await addSaved({ data: { state: result.state, county: result.county } });
+        toast.success(`Saved ${result.county}, ${result.state}`);
+      }
+      const next = await listSaved();
+      setSaved(next);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update saved searches");
+    }
+  };
+
+  const removeSavedAt = async (s: SavedSearch) => {
+    try {
+      await removeSaved({ data: { state: s.state, county: s.county } });
+      setSaved((prev) => prev.filter((x) => x.id !== s.id));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not remove saved");
+    }
+  };
+
+  const clearRecent = () => {
+    localStorage.removeItem(RECENT_KEY);
+    setRecent([]);
   };
 
   const tryAnother = () => {
     setResult(null);
     setError(null);
     setCounty("");
-    // Focus the county input on next tick
-    setTimeout(() => {
-      const el = document.querySelector<HTMLInputElement>('input[placeholder^="County name"]');
-      el?.focus();
-    }, 0);
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   return (
@@ -93,6 +216,9 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
         <h2 className="text-lg font-bold tracking-tight">Any-county search</h2>
         <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           Live · EPA SDWIS · 7-day cache
+        </span>
+        <span className="ml-auto hidden items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-[10px] text-muted-foreground sm:inline-flex">
+          Press <kbd className="rounded bg-secondary px-1 font-mono">/</kbd> to focus
         </span>
       </header>
 
@@ -118,12 +244,73 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
+            ref={inputRef}
             value={county}
             onChange={(e) => setCounty(e.target.value)}
+            onFocus={() => setShowHistory(true)}
+            onBlur={() => setTimeout(() => setShowHistory(false), 150)}
             placeholder="County name (e.g. Palm Beach)"
             className="h-10 w-full rounded-xl border border-input bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
             disabled={loading}
           />
+          {showHistory && (recent.length > 0 || saved.length > 0) && (
+            <div className="absolute left-0 right-0 top-11 z-20 max-h-80 overflow-auto rounded-xl border border-border bg-card p-2 shadow-lg">
+              {saved.length > 0 && (
+                <div className="mb-2">
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    Saved
+                  </div>
+                  {saved.map((s) => (
+                    <div key={s.id} className="group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-secondary">
+                      <BookmarkCheck className="h-3.5 w-3.5 text-primary" />
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); jumpTo(s.state, s.county); }}
+                        className="flex-1 text-left text-sm text-foreground"
+                      >
+                        <span className="font-medium">{s.county}</span>
+                        <span className="ml-1 text-xs text-muted-foreground">{s.state}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); removeSavedAt(s); }}
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        title="Remove"
+                      >
+                        <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {recent.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between px-2 py-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Recent</span>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); clearRecent(); }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {recent.map((r, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); jumpTo(r.state, r.county); }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary"
+                    >
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-foreground">{r.county}</span>
+                      <span className="text-xs text-muted-foreground">{r.state}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <button
           type="submit"
@@ -181,6 +368,19 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
                 day: "numeric",
               })}
             </span>
+            <button
+              type="button"
+              onClick={toggleSave}
+              className={`ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${
+                isSaved
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:bg-secondary"
+              }`}
+              title={isSaved ? "Remove from saved" : "Save this search"}
+            >
+              {isSaved ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+              {isSaved ? "Saved" : "Save search"}
+            </button>
           </div>
           {result.systems.length > 0 ? (
             (() => {
@@ -227,6 +427,31 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
               onReset={tryAnother}
             />
           )}
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className="rounded-xl border border-border bg-secondary/40 p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            <Compass className="h-3 w-3" /> Other counties searched in {state}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions
+              .filter((s) => !result || s.county.toLowerCase() !== result.county.toLowerCase())
+              .slice(0, 10)
+              .map((s) => (
+                <button
+                  key={s.county}
+                  type="button"
+                  onClick={() => jumpTo(state, s.county)}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-secondary disabled:opacity-50"
+                >
+                  {s.county}
+                  <span className="text-[10px] text-muted-foreground">· {s.systemCount}</span>
+                </button>
+              ))}
+          </div>
         </div>
       )}
     </section>
