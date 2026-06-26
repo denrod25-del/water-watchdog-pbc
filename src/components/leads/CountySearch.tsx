@@ -7,6 +7,7 @@ import { LeadTable } from "./LeadTable";
 import { useLeadStore } from "./useLeadStatus";
 import { Globe2, Loader2, RefreshCw, Search, ServerCrash, Database } from "lucide-react";
 import { toast } from "sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Result = {
   state: string;
@@ -120,10 +121,11 @@ export function CountySearch({ onSelect }: { onSelect: (l: Lead) => void }) {
       )}
 
       {loading && !result && (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Querying EPA Safe Drinking Water Information System…
-        </div>
+        <LoadingState />
+      )}
+
+      {loading && result && (
+        <LoadingState />
       )}
 
       {result && (
