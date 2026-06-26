@@ -104,6 +104,33 @@ export type Database = {
         }
         Relationships: []
       }
+      saved_searches: {
+        Row: {
+          county_name: string
+          created_at: string
+          id: string
+          label: string | null
+          state_code: string
+          user_id: string
+        }
+        Insert: {
+          county_name: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          state_code: string
+          user_id: string
+        }
+        Update: {
+          county_name?: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          state_code?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
